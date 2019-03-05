@@ -1,0 +1,35 @@
+--@name PID
+--@author
+--@shared
+
+local PID = {}
+PID.P = 0
+PID.I = 0
+PID.D = 0
+PID.MI = math.huge
+PID.MO = math.huge
+PID.Integral = 0
+PID.Old = 0
+PID.Update = function(PID, Input, Target)
+  
+    local P = (Input-Target)
+    local I = PID.Integral
+    PID.Integral=math.clamp(PID.Integral+(Input-Target),-PID.MI, PID.MI)
+    local D = (Input-PID.Old)
+    PID.Old = Input
+    return math.clamp((P*PID.P)+(I*PID.I)+(D*PID.D), -PID.MO, PID.MO)      
+end
+setmetatable(PID,{
+    __call = function(T,p,i,d, MO, MI)
+        --printTable(T)
+        if p == nil or i == nil or d == nil then error("Missing first 3 arguments. NewPID = PID(P, I, D, PID.MaxOutput, MaxIntegral) should be correct. Last are optimal" ) end
+        local NewPID = table.copy(T)  
+        NewPID.P = p
+        NewPID.I = i
+        NewPID.D = d
+        NewPID.MO = MO
+        NewPID.MI = MI
+        return NewPID
+    end
+})
+return PID

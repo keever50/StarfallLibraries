@@ -1,0 +1,178 @@
+--@name async_render
+--@author Aeralius
+--@shared
+
+
+--perf. Same as used in expression 2. perf( max usage in % ). Returns true when yielded.            
+local function perf(use, optimal)
+    if quotaUsed() >= quotaMax()*(use/100) then
+        try(function() coroutine.yield() end, function( )
+            if optimal == false then
+                throw("Must be in a thread to run. ",  1, false)    
+            end
+        end)
+        return true
+    else
+        return false    
+    end
+end  
+
+--perf2. Same as normal perf, but it takes cpu time instead.        
+local function perf2(cpu, optimal)
+    if quotaUsed()*1000000 >= cpu then
+        try(function() coroutine.yield() end, function(  )
+            if optimal == false then
+                throw("Must be in a thread to run. ", 1, false )    
+            end
+        end)
+        return true
+    else
+        return false    
+    end
+end  
+
+
+local thread = {}
+thread.pool = {}
+thread.running = coroutine.running
+thread.create = function( func ) 
+    local thr = 
+    {
+        args = {},
+        running = false,
+        co = coroutine.create(func),
+        name = "unnamed_thread",
+        run = function(this, ... )
+            if this.running == false then
+                this.args = {...}
+                this.running = true
+                thread.pool[tostring(this.co)] = this
+                
+            end
+        end,
+        stop = function(this)
+            if this.running == true then
+                this.running = false
+                thread.pool[tostring(this.co)] = nil 
+            end
+        end,
+        update = function(this, ...)
+            this.args = {...}    
+        end,
+        onExit = function( ) end,
+        onYield = function( ) end,
+        onReturn = function( ) end,
+        
+    }
+    return thr
+end
+
+local renderer = {}
+renderer.create = function( name, x, y, w, h )
+    local R = {}
+    render.createRenderTarget( name .. "buffer" ) 
+    render.createRenderTarget( name ) 
+    
+    
+    R.thread = thread.create(function( name, x, y, w, h )
+        while true do
+            render.selectRenderTarget( nil )
+            render.setColor(Color(255,255,255))
+            render.setRenderTargetTexture( name )
+            render.drawTexturedRect( x, y, w, h )
+            render.drawText(x,y,name,0)   
+            --render.drawText(w,h,"B",2)   
+            coroutine.yield()
+        end
+    end)
+    R.thread:run( name, x, y, w, h )
+    
+    R.name = name
+    R.Start = function( this )
+        render.selectRenderTarget( this.name .. "buffer")   
+        --render.clear( Color( 0, 0, 0, 255 ) )
+        render.setColor(Color(0,0,0))
+        render.drawRectFast(0,0,1024+1,1024+1)
+    end
+    R.Continue = function( this )
+        render.selectRenderTarget( this.name .. "buffer")   
+        --render.clear( Color( 0, 0, 0, 255 ) )
+        --render.setColor(Color(0,0,0))
+        --render.drawRect(0,0,1024,1024)
+    end    
+    R.Flush = function( this )
+        render.selectRenderTarget( this.name ) 
+        render.setColor(Color(255,255,255))
+        render.setRenderTargetTexture(this.name .. "buffer")
+        render.drawTexturedRect( 0, 0, 1024, 1024 ) 
+        render.selectRenderTarget( this.name .. "buffer")  
+    end    
+    R.End = function( this )
+        
+        render.selectRenderTarget( this.name ) 
+        render.setColor(Color(255,255,255))
+        render.setRenderTargetTexture(this.name .. "buffer")
+        render.drawTexturedRect( 0, 0, 1024, 1024 )
+    end    
+    R.yield = function( this )
+        render.selectRenderTarget(nil)
+        coroutine.yield()
+        render.selectRenderTarget( this.name .. "buffer" )  
+    end
+    R.wait = function( this, duration )
+        render.selectRenderTarget(nil)
+        coroutine.wait( duration )
+        render.selectRenderTarget( this.name .. "buffer" )  
+    end
+    R.perf = function( this, p, opt )
+        render.selectRenderTarget(nil)
+        perf(p, opt)
+        render.selectRenderTarget( this.name .. "buffer" )  
+    end
+    R.perf2 = function( this, p, opt )
+        if quotaUsed()*1000000 >= p then
+            try(function()
+                render.selectRenderTarget(nil)    
+                coroutine.yield() 
+                render.selectRenderTarget( this.name .. "buffer" )   
+            end, function(  )
+                if optimal == false then
+                    throw("Must be in a thread to run. ", 1, false )    
+                end
+            end)
+            return true
+        else
+            return false    
+        end        
+    end    
+    return R
+end
+
+
+
+hook.add("render","async_render_threading", function( )
+    for k, v in pairs(thread.pool) do
+        if v.args == nil then continue end
+        if coroutine.status(v.co) != "suspended" then thread.pool[k].onExit(thread.pool[k].Return) thread.pool[k] = nil continue end
+        if v.running == false then continue end
+        if coroutine.status(v.co) == "suspended" then
+            thread.pool[k].onYield(thread.pool[k].Return)
+            if thread.pool[k].Return != nil then
+                thread.pool[k].onReturn(thread.pool[k].Return)    
+            end
+        end
+        try(function() thread.pool[k].Return = coroutine.resume(v.co, unpack(v.args)) end, function( err ) 
+            print(  err )    
+        end)
+    end
+end)
+
+return
+{
+    renderer = renderer,
+    perf = perf, 
+    perf2 = perf2,
+    thread = thread,
+    wait = coroutine.wait,
+    yield = coroutine.yield
+} 
